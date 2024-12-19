@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Kaatuvan puun visualisaatio</title>
+<script src="https://cdn.jsdelivr.net/npm/p5@1.6.0/lib/p5.min.js"></script>
+<style>
+  body {
+    margin: 0;
+    font-family: sans-serif;
+    background: #e9f5f0;
+  }
+  #info {
+    position: absolute;
+    top: 50px;
+    right: 10px;
+    width: 220px;
+    background: #ffffffaa;
+    padding: 10px;
+    border-radius: 5px;
+    font-size: 14px;
+    line-height: 1.4em;
+  }
+  h1 {
+    font-size: 16px;
+    margin: 0 0 5px 0;
+  }
+  .label {
+    font-weight: bold;
+  }
+  #forceInput, #angleInput, #massInput {
+    width: 100%;
+  }
+  #small-text {
+    font-size: 12px; 
+    color: #555; 
+    margin-top: 10px; 
+  }
+</style>
+</head>
+<body>
+<h2>Puunkaatoon tarvittavan köyden pituuslaskuri</h2>
+<p class="small-text">**Huomautus:** Tämä työkalu tarjoaa laskelmia vinssauksen suunnitteluun, mutta laskelmien oikeellisuutta ei taata.</p>
+
+
+<div id="info">
+  <h1>Kaatuvan puun tiedot</h1>
+  <div><span class="label">Köyden pituus:</span> <span id="ropeLength">-</span> m</div>
+  <div><span class="label">Köyden korkeus puussa:</span> <span id="ropeHeight">-</span> m</div>
+  <div><span class="label">Köyden sijainti maassa:</span> <span id="ropeGroundPos">-</span> m</div>
+  <div><span class="label">Puun latvan sijainti:</span> <span id="treeTopPos">-</span> m</div>
+  
+  <div><span class="label">Vinssin vetovoima:</span> <span id="forceVal">-</span> kg</div>
+  <div><input type="range" id="forceInput" min="500" max="3200" value="1000"></div>
+  
+  <div><span class="label">Puun kulma:</span> <span id="angleVal">-</span>°</div>
+  <div><input type="range" id="angleInput" min="-20" max="20" value="0"></div>
+  
+  <div><span class="label">Puun massa:</span> <span id="massVal">-</span> kg</div>
+  <div><input type="range" id="massInput" min="1000" max="6000" value="3000"></div>
+  
+  <div><span class="label">Painon momentti:</span> <span id="momentGravity">-</span> Nm</div>
+  <div><span class="label">Vinssin momentti:</span> <span id="momentVal">-</span> Nm</div>
+  <div><span class="label">Riittääkö vinssin voima?:</span> <span id="enough">-</span></div>
+</div>
+<script>
+
+// Puuparametrit
+let treeHeight_m = 35;
+let scaleFactor = 10; // 1m = 10px
+let treeHeight_px = treeHeight_m * scaleFactor;
+
+let canvasWidth = 800;
+let canvasHeight = 500;
+let groundY = 450;
+let treeBaseX = 100;
+let treeBaseY = groundY;
+
+// Köyden kiinnityskorkeus puussa
+let ropeAttachHeight_m = 10;
+
+// Köyden ankkuripiste maassa
+let ropeAnchorDist_m = 20;
+let ropeAnchorX_px = treeBaseX + ropeAnchorDist_m*scaleFactor;
+let ropeAnchorY_px = groundY;
+
+// Draggable handle
+let handleRadius = 8;
+let draggingTree = false;
+let draggingGround = false;
+
+// Slider elementit
+let forceSlider, angleSlider, massSlider;
+
+function setup() {
+  createCanvas(canvasWidth, canvasHeight);
+  forceSlider = document.getElementById("forceInput");
+  angleSlider = document.getElementById("angleInput");
+  massSlider = document.getElementById("massInput");
+}
+
+function drawHouse(x, y, w, h) {
+  fill(200, 150, 100);
+  stroke(0);
+  strokeWeight(1);
+  rect(x, y, w, h);
+
+  // Katto
+  fill(150, 50, 50);
+  triangle(x, y, x+w, y, x+w/2, y-(h/2));
+
+  // Ovi
+  fill(100,80,60);
+  let doorWidth = w * 0.3;
+  let doorHeight = h * 0.5;
+  rect(x + w*0.35, y + h - doorHeight, doorWidth, doorHeight);
+}
+
+function drawSpruceLimbs() {
+  let startHeight_m = 3;
+  let limbSpacing_m = 1.5;
+  let maxLimbLength_px = 40;
+  let minLimbLength_px = 10;
+  
+  let angleDownDeg = 20;
+  let angleDown = radians(angleDownDeg);
+  let angleDownLeft = PI - angleDown; 
+
+  let endHeight_m = treeHeight_m;
+  let heightRange = endHeight_m - startHeight_m;
+
+  stroke(0,100,0);
+  strokeWeight(5);
+  
+  for (let h_m = startHeight_m; h_m < endHeight_m; h_m += limbSpacing_m) {
+    let fraction = (h_m - startHeight_m)/heightRange;
+    let limbLength_px = maxLimbLength_px - fraction*(maxLimbLength_px - minLimbLength_px);
+
+    let trunkX = treeBaseX;
+    let trunkY = treeBaseY - h_m*scaleFactor;
+    
+    let x_right = trunkX + limbLength_px*cos(angleDown);
+    let y_right = trunkY + limbLength_px*sin(angleDown);
+    
+    let x_left = trunkX + limbLength_px*cos(angleDownLeft);
+    let y_left = trunkY + limbLength_px*sin(angleDownLeft);
+
+    line(trunkX, trunkY, x_right, y_right);
+    line(trunkX, trunkY, x_left, y_left);
+  }
+}
+
+function draw() {
+  background(233,245,240);
+  
+  // Arvojen luku
+  let force_kg = Number(forceSlider.value);
+  let angleDeg = Number(angleSlider.value); // -20 ... +20
+  let mass_kg = Number(massSlider.value); // 1000 ... 6000
+
+  // Päivitetään info
+  document.getElementById("forceVal").textContent = force_kg.toFixed(0);
+  document.getElementById("angleVal").textContent = angleDeg.toFixed(0);
+  document.getElementById("massVal").textContent = mass_kg.toFixed(0);
+
+  let angleRad = radians(angleDeg);
+
+  // Piirretään maa
+  stroke(50);
+  strokeWeight(2);
+  line(0,groundY,width,groundY);
+  
+  // Lasketaan puun yläpiste kulman perusteella
+  // Kulma: 0 = pysty. Positiivinen kulma kallistaa puuta oikealle.
+  let top_x = treeBaseX + treeHeight_px * sin(angleRad);
+  let top_y = treeBaseY - treeHeight_px * cos(angleRad);
+
+  // Piirrä puu kulmassa
+  stroke(70,40,20);
+  strokeWeight(10);
+  line(treeBaseX, treeBaseY, top_x, top_y);
+
+  // Piirrä oksat (oksat piirretty ikään kuin puu pystyssä - halutessaan voisi myös kääntää oksat,
+  // mutta tässä ne jätetään yksinkertaisuuden vuoksi pystyyn. Jos halutaan oksien kääntyvän mukana,
+  // ne pitäisi piirtää puun kulman mukaan. Tässä oletamme ne pystyssä.)
+  // Vaihtoehtoisesti voidaan jättää ne pystyyn yksinkertaisuuden vuoksi. 
+  // Jos halutaan ne puun mukana, pitää laskea uusilla koordinaateilla.
+  // Tässä jätetään yksinkertaiseksi ja piiretään ennen kiertoa.
+  // Helpoin ratkaisu: piiretään oksat ikäänkuin puu olisi vielä pystyssä.
+  // Jos halutaan realistista, pitäisi kääntää oksien piirtokoordinaatit. 
+  // Tässä jätetään yksinkertaiseksi.
+  push();
+  // Siirretään ja käännetään koordinaatisto puun tyveen, piirretään oksat kulmassa
+  translate(treeBaseX, treeBaseY);
+  rotate(angleRad);
+  drawSpruceLimbsAtAngle();
+  pop();
+  
+  // Piirrä talo
+  drawHouse(treeBaseX - 110, groundY - 100, 100, 100);
+  
+  // Köyden kiinnityspiste puussa (pituussuunnassa)
+  let ropeAttachY_px = treeBaseY - ropeAttachHeight_m * scaleFactor;
+  // Kiinnityspisteen kulmakorjaus
+  // Piste puun rungolla joka kulmassa:
+  // rungon pituuspuolikkaat: 0 alhaalta, - (ropeAttachHeight_m) ylös pystyssä
+  // Nyt kun puu on kallistunut: 
+  // Koordinaatit pivotista: 
+  // pivot: (treeBaseX, treeBaseY)
+  // ropeAttach valimatka rungolla = ropeAttachHeight_m * scaleFactor
+  let attach_x = treeBaseX + (ropeAttachHeight_m*scaleFactor)*sin(angleRad);
+  let attach_y = treeBaseY - (ropeAttachHeight_m*scaleFactor)*cos(angleRad);
+
+  // Piirrä köysi
+  stroke(0,0,255);
+  strokeWeight(2);
+  line(attach_x, attach_y, ropeAnchorX_px, ropeAnchorY_px);
+  
+  // Lasketaan köyden pituus metreissä
+  let dx = (ropeAnchorX_px - attach_x);
+  let dy = (ropeAnchorY_px - attach_y);
+  let ropeLength_px = sqrt(dx*dx + dy*dy);
+  let ropeLength_m = ropeLength_px / scaleFactor;
+
+  // Päivitetään infokentät
+  document.getElementById("ropeLength").textContent = ropeLength_m.toFixed(2);
+  let ropeAttachHeight_m_current = ropeAttachHeight_m; 
+  document.getElementById("ropeHeight").textContent = ropeAttachHeight_m_current.toFixed(2);
+  let groundPos_m = (ropeAnchorX_px - treeBaseX)/scaleFactor;
+  document.getElementById("ropeGroundPos").textContent = groundPos_m.toFixed(2);
+  let topPos_m = (top_x - treeBaseX)/scaleFactor; 
+  document.getElementById("treeTopPos").textContent = topPos_m.toFixed(2) + " m";
+
+  // Lasketaan momentit
+  let force_N = force_kg * 9.81; 
+
+  // Vektori pivotista kiinnityspisteeseen (m)
+  let r_x_m = ((attach_x - treeBaseX)/scaleFactor);
+  let r_y_m = ((attach_y - treeBaseY)/scaleFactor);
+
+  // Voima köydestä
+  let Fx = ((ropeAnchorX_px - attach_x)/ropeLength_px)*force_N;
+  let Fy = ((ropeAnchorY_px - attach_y)/ropeLength_px)*force_N;
+
+  let torque_rope = (r_x_m * Fy - r_y_m * Fx); // Nm
+  document.getElementById("momentVal").textContent = torque_rope.toFixed(2) ;
+
+  // Painovoima
+  let g = 9.81;
+  // Massakeskipiste on puun puolivälissä
+  let halfLength_m = treeHeight_m/2;
+  // Massakeskipisteen koordinaatit suhteessa pivotiiin
+  let cm_x_m = halfLength_m * sin(angleRad);
+  let cm_y_m = -halfLength_m * cos(angleRad);
+
+  let weight_N = mass_kg * g;
+  // Paino suoraan alaspäin: Fx=0, Fy=-weight_N
+  let torque_gravity = (cm_x_m * (-weight_N) - cm_y_m*0); 
+  // Yksinkertaistettuna: torque_gravity = cm_x_m * (-weight_N)
+  // Jos puu kallistuu oikealle (angle >0), cm_x_m >0, paino negatiivinen y-suunta => torque_gravity negatiivinen
+
+  document.getElementById("momentGravity").textContent = torque_gravity.toFixed(2) ;
+
+  // Tarkista riittääkö vinssin voima
+  // Jos puu kallistuu oikealle (positiivinen kulma), cm_x_m>0 ja torque_gravity on negatiivinen.
+  // Köysi vetää vaakasuunnassa oikealle yläpuolelta, tuottaen yleensä positiivisen momentin.
+  // Jotta köysi riittäisi, sen momentin tulee olla vähintään painomomentin vastavoima eli 
+  // |torque_rope| >= |torque_gravity|.
+  // Käytännössä, jos puu kallistuu oikealle, painon momentti on negatiivinen, köyden momentti positiivinen pitäisi ylittää sen suuruus.
+  
+  let enough = Math.abs(torque_rope) >= Math.abs(torque_gravity);
+  document.getElementById("enough").textContent = enough ? "Kyllä" : "Ei";
+
+  // Piirrä kahvat
+  noStroke();
+  fill(200,0,0);
+  ellipse(attach_x, attach_y, handleRadius*2, handleRadius*2);
+  
+  fill(0,0,200);
+  ellipse(ropeAnchorX_px, ropeAnchorY_px, handleRadius*2, handleRadius*2);
+}
+
+// Piirtää oksat kallistetussa koordinaatistossa
+function drawSpruceLimbsAtAngle() {
+  let startHeight_m = 3;
+  let limbSpacing_m = 1.5;
+  let maxLimbLength_px = 40;
+  let minLimbLength_px = 10;
+  
+  let angleDownDeg = 20;
+  let angleDown = radians(angleDownDeg);
+  let angleDownLeft = PI - angleDown; 
+
+  let endHeight_m = treeHeight_m;
+  let heightRange = endHeight_m - startHeight_m;
+
+  stroke(0,100,0);
+  strokeWeight(5);
+  
+  for (let h_m = startHeight_m; h_m < endHeight_m; h_m += limbSpacing_m) {
+    let fraction = (h_m - startHeight_m)/heightRange;
+    let limbLength_px = maxLimbLength_px - fraction*(maxLimbLength_px - minLimbLength_px);
+
+    // Nyt puu on kallistettu koordinaatistossamme jo rotate(angleRad) ulkopuolella
+    // Joten oksat piirtyvät rungon suuntaisesti
+    // runko on y-akselin suuntaan (koska rotate tehtiin jo)
+    let trunkX = 0;
+    let trunkY = - h_m*scaleFactor; // koska 0,0 on puun tyvi ja y ylöspäin negatiivinen suunta
+
+    let x_right = trunkX + limbLength_px*cos(angleDown);
+    let y_right = trunkY + limbLength_px*sin(angleDown);
+    
+    let x_left = trunkX + limbLength_px*cos(angleDownLeft);
+    let y_left = trunkY + limbLength_px*sin(angleDownLeft);
+
+    line(trunkX, trunkY, x_right, y_right);
+    line(trunkX, trunkY, x_left, y_left);
+  }
+}
+
+// Mouse interaction
+function mousePressed() {
+  let angleDeg = Number(angleSlider.value);
+  let angleRad = radians(angleDeg);
+  let attach_x = treeBaseX + (ropeAttachHeight_m*scaleFactor)*sin(angleRad);
+  let attach_y = treeBaseY - (ropeAttachHeight_m*scaleFactor)*cos(angleRad);
+
+  if(dist(mouseX, mouseY, attach_x, attach_y) < handleRadius*2) {
+    draggingTree = true;
+  }
+  if(dist(mouseX, mouseY, ropeAnchorX_px, ropeAnchorY_px) < handleRadius*2) {
+    draggingGround = true;
+  }
+}
+
+function mouseDragged() {
+  // Jos siirretään puun kahvaa, muutetaan köyden kiinnityskohtaa rungolla (vain pystyyn, 
+  // mutta nyt puu on kallistettu. Oletetaan yksinkertaisuuden vuoksi että kahva liikkuu 
+  // puun rungon suuntaisesti pystylinjassa ilman kulmakorjausta, tai 
+  // muutetaan vain rungon korkeussuuntaista kiinnitystä.
+  //
+  // Tässä yksinkertaistetaan ja oletetaan, että kahva liikkuu suhteellisen pystysuunnassa 
+  // puun alkuperäisessä asennossa (kuten aiemmin). Täydellinen kulmakorjaus vaatisi 
+  // projektioita ja trigonometriaa. Jätetään tämä ennalleen yksinkertaisuuden vuoksi.
+
+  if(draggingTree) {
+    let newY = mouseY;
+    if(newY < treeBaseY - treeHeight_px) newY = treeBaseY - treeHeight_px;
+    if(newY > treeBaseY) newY = treeBaseY;
+    // Lasketaan uusi kiinnityskorkeus puussa
+    ropeAttachHeight_m = (treeBaseY - newY) / scaleFactor;
+  }
+  
+  if(draggingGround) {
+    let newX = mouseX;
+    if(newX < treeBaseX + 10) newX = treeBaseX + 10; 
+    ropeAnchorX_px = newX;
+  }
+}
+
+function mouseReleased() {
+  draggingTree = false;
+  draggingGround = false;
+}
+
+function dist(x1,y1,x2,y2) {
+  return sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
+}
+
+</script>
+</body>
+</html>
