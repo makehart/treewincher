@@ -269,7 +269,7 @@ function draw() {
   // |torque_rope| >= |torque_gravity|.
   // Käytännössä, jos puu kallistuu oikealle, painon momentti on negatiivinen, köyden momentti positiivinen pitäisi ylittää sen suuruus.
   
-  let enough = Math.abs(torque_rope) >= Math.abs(torque_gravity);
+  let enough = Math.abs(torque_rope) >= torque_gravity;
   document.getElementById("enough").textContent = enough ? "Kyllä" : "Ei";
 
   // Piirrä kahvat
